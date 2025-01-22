@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Health Portal</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.2.1/flowbite.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center space-x-8">
+                    <span class="text-xl font-bold text-blue-600">Health Portal</span>
+                    <a href="my-records.html" class="text-gray-700 hover:text-blue-600 font-medium transition-colors">
+                        My Records
+                    </a>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span id="userEmail" class="text-gray-700"></span>
+                    <button onclick="logout()" 
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors duration-300">
+                        Logout
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Rest of the dashboard content remains the same -->
+    <div class="max-w-7xl mx-auto px-4 py-8">
+        <div class="bg-white rounded-lg shadow-xl p-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6">Upload Health Records</h2>
+            
+            <div class="space-y-4">
+                <div class="border-2 border-dashed border-gray-300 rounded-lg p-8">
+                    <div class="text-center">
+                        <input type="file" id="fileUpload" class="hidden" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png">
+                        <label for="fileUpload" class="cursor-pointer">
+                            <div class="mx-auto h-24 w-24 text-gray-400 mb-4">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                          d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                                </svg>
+                            </div>
+                            <span class="mt-2 block text-sm font-medium text-gray-700">
+                                Choose a file or drag and drop
+                            </span>
+                            <span class="mt-1 block text-sm text-gray-500">
+                                PDF, DOC, DOCX, JPG, JPEG, or PNG up to 10MB
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="fileList" class="mt-6 space-y-2">
+                    <!-- Uploaded files will appear here -->
+                </div>
+
+                <button onclick="uploadFile()" 
+                        class="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-300">
+                    Upload File
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Display user email
+        document.getElementById('userEmail').textContent = localStorage.getItem('userEmail');
+
+        // Handle file selection
+        document.getElementById('fileUpload').addEventListener('change', function(e) {
+            const fileName = e.target.files[0]?.name;
+            if (fileName) {
+                const fileList = document.getElementById('fileList');
+                const fileItem = document.createElement('div');
+                fileItem.className = 'flex items-center justify-between bg-gray-50 p-4 rounded-lg';
+                fileItem.innerHTML = `
+                    <span class="text-gray-700">${fileName}</span>
+                    <span class="text-green-600">Ready to upload</span>
+                `;
+                fileList.appendChild(fileItem);
+            }
+        });
+
+        // Handle file upload
+        function uploadFile() {
+            const fileInput = document.getElementById('fileUpload');
+            if (fileInput.files.length > 0) {
+                // Simulate upload - in real app, would send to server
+                alert('File uploaded successfully!');
+                fileInput.value = '';
+                document.getElementById('fileList').innerHTML = '';
+            } else {
+                alert('Please select a file first');
+            }
+        }
+
+        // Handle logout
+        function logout() {
+            window.location.href = 'login.html';
+        }
+    </script>
+</body>
+</html>
