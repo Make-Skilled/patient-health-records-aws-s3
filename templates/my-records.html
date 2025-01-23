@@ -18,7 +18,7 @@
                 </div>
                 <div class="flex items-center space-x-4">
                     <span id="userEmail" class="text-gray-700"></span>
-                    <button onclick="logout()" 
+                    <button 
                             class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors duration-300">
                         Logout
                     </button>
@@ -33,19 +33,20 @@
             <h2 class="text-2xl font-bold text-gray-800 mb-6">My Health Records</h2>
             
             <div class="space-y-4">
-                <!-- Search and Filter -->
+                <!-- Category Filter -->
                 <div class="flex gap-4 mb-6">
-                    <input type="text" 
-                           placeholder="Search files..." 
-                           class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                           id="searchInput">
                     <select class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             id="filterSelect">
                         <option value="all">All Files</option>
-                        <option value="pdf">PDF</option>
-                        <option value="doc">DOC</option>
-                        <option value="image">Images</option>
+                        <option value="Medical Reports">Reports</option>
+                        <option value="x-ray">X-ray</option>
+                        <option value="medical bills">Medical Bills</option>
                     </select>
+                    <button 
+                        id="filterBtn"
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+                        Show Records
+                    </button>
                 </div>
 
                 <!-- Files List -->
@@ -57,111 +58,76 @@
     </div>
 
     <script>
-        // Display user email
-        document.getElementById('userEmail').textContent = localStorage.getItem('userEmail');
-
-        // Sample function to fetch files from S3
-        async function fetchFiles() {
-            try {
-                // In a real application, this would be an API call to your backend
-                // which would then fetch files from S3
-                const files = [
-                    // This is where your S3 files would be listed
-                    // Sample structure:
-                    // {
-                    //     name: filename,
-                    //     type: filetype,
-                    //     lastModified: date,
-                    //     size: filesize,
-                    //     url: s3url
-                    // }
-                ];
-
-                displayFiles(files);
-            } catch (error) {
-                console.error('Error fetching files:', error);
-            }
+        // Function to fetch and display health records based on the selected category
+        function fetchHealthRecords(category = 'all') {
+            fetch(`/get_health_records?category=${category}`)
+                .then(response => response.json())
+                .then(data => {
+                    const filesList = document.getElementById('filesList');
+                    filesList.innerHTML = '';  // Clear the current records
+    
+                    if (data.records && data.records.length > 0) {
+                        data.records.forEach(record => {
+                            const fileElement = document.createElement('div');
+                            fileElement.classList.add('border', 'p-4', 'rounded-lg', 'shadow');
+                            fileElement.innerHTML = `
+                                <h3 class="font-semibold text-gray-800">${record.filename}</h3>
+                                <p class="text-gray-600">Category: ${record.category}</p>
+                                <p class="text-gray-600">Uploaded at: ${new Date(record.uploaded_at).toLocaleString()}</p>
+                                <a href="${record.file_uri}" class="text-blue-600" target="_blank">View File</a>
+                                <button onclick="deleteRecord('${record.file_id}')"
+                                        class="mt-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg">
+                                    Delete
+                                </button>
+                            `;
+                            filesList.appendChild(fileElement);
+                        });
+                    } else {
+                        filesList.innerHTML = '<p>No records found.</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching records:', error);
+                    document.getElementById('filesList').innerHTML = '<p>Error fetching records.</p>';
+                });
         }
+    
+        // Function to delete a health record
+        function deleteRecord(fileId) {
+            const confirmation = confirm("Are you sure you want to delete this record?");
+            if (!confirmation) return;
 
-        // Function to display files
-        function displayFiles(files) {
-            const filesList = document.getElementById('filesList');
-            filesList.innerHTML = ''; // Clear current list
-
-            if (files.length === 0) {
-                filesList.innerHTML = `
-                    <div class="text-center py-8 text-gray-500">
-                        No files found
-                    </div>
-                `;
-                return;
-            }
-
-            files.forEach(file => {
-                const fileItem = document.createElement('div');
-                fileItem.className = 'flex items-center justify-between bg-gray-50 p-4 rounded-lg hover:bg-gray-100 transition-colors';
-                fileItem.innerHTML = `
-                    <div class="flex items-center space-x-4">
-                        <div class="text-gray-400">
-                            <svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                                      d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-sm font-medium text-gray-900">${file.name}</h3>
-                            <p class="text-sm text-gray-500">
-                                ${file.type} • ${formatFileSize(file.size)} • 
-                                ${new Date(file.lastModified).toLocaleDateString()}
-                            </p>
-                        </div>
-                    </div>
-                    <div class="flex space-x-2">
-                        <button onclick="downloadFile('${file.url}')" 
-                                class="text-blue-600 hover:text-blue-700">
-                            Download
-                        </button>
-                    </div>
-                `;
-                filesList.appendChild(fileItem);
+            fetch('/delete_health_record', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ file_id: fileId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message === "Record deleted successfully") {
+                    alert("Record deleted successfully");
+                    fetchHealthRecords();  // Reload the records after deletion
+                } else {
+                    alert("Error deleting record: " + (data.error || "Unknown error"));
+                }
+            })
+            .catch(error => {
+                console.error('Error deleting record:', error);
+                alert('Error deleting record');
             });
         }
 
-        // Utility function to format file size
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-
-        // Function to download file
-        function downloadFile(url) {
-            // In a real application, this would handle the file download from S3
-            window.open(url, '_blank');
-        }
-
-        // Handle logout
-        function logout() {
-            window.location.href = 'login.html';
-        }
-
-        // Search and filter functionality
-        document.getElementById('searchInput').addEventListener('input', function(e) {
-            // Implement search functionality
-            const searchTerm = e.target.value.toLowerCase();
-            // Filter files based on search term
+        // Initial fetch for all records
+        fetchHealthRecords();
+    
+        // Event listener for the category filter button
+        document.getElementById('filterBtn').addEventListener('click', function() {
+            const category = document.getElementById('filterSelect').value;
+            fetchHealthRecords(category);
         });
-
-        document.getElementById('filterSelect').addEventListener('change', function(e) {
-            // Implement filter functionality
-            const filterValue = e.target.value;
-            // Filter files based on selected type
-        });
-
-        // Initial load
-        fetchFiles();
     </script>
+    
 </body>
 </html>

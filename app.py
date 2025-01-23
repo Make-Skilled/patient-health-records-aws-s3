@@ -1,7 +1,8 @@
-from flask import Flask, render_template, request, redirect, session, url_for
-from werkzeug.utils import secure_filename
 import boto3
 import uuid
+from datetime import datetime
+from flask import Flask, request, session,redirect,render_template
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.secret_key = '1234567890'
@@ -10,17 +11,12 @@ app.secret_key = '1234567890'
 AWS_ACCESS_KEY = ''
 AWS_SECRET_KEY = ''
 AWS_REGION = ''
-S3_BUCKET = ''
-DYNAMO_TABLE = ''
+DYNAMO_TABLE = 'users'
+HEALTH_RECORDS_TABLE = 'health_records'
 
-# Initialize AWS services
-s3 = boto3.client(
-    's3',
-    aws_access_key_id=AWS_ACCESS_KEY,
-    aws_secret_access_key=AWS_SECRET_KEY,
-    region_name=AWS_REGION
-)
 
+S3_BUCKET = 'aws-poc-demo-rev'
+# Initialize AWS DynamoDB
 dynamodb = boto3.resource(
     'dynamodb',
     aws_access_key_id=AWS_ACCESS_KEY,
@@ -29,144 +25,215 @@ dynamodb = boto3.resource(
 )
 table = dynamodb.Table(DYNAMO_TABLE)
 
-# Routes
+health_records_table = dynamodb.Table(HEALTH_RECORDS_TABLE)
+
+
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+    region_name=AWS_REGION
+)
+
 @app.route('/')
+def home():
+    return render_template('landing.html')
+
+@app.route('/registerpage')
 def index():
     return render_template('register.html')
 
-@app.route("/loginpage")
+@app.route('/loginpage')
 def loginpage():
     return render_template('login.html')
 
 @app.route('/registerUser', methods=['POST'])
 def register_user():
-    name = request.form['name']
     email = request.form['email']
+    username = request.form['username']
     password = request.form['password']
 
-    # Store plain text password (not recommended for production)
     table.put_item(
         Item={
             'email': email,
-            'username': name,
-            'password': password,  # Storing password in plain text
-            'profile_pic': ''
+            'username': username,
+            'password': password
         }
     )
     return render_template('login.html')
 
-from boto3.dynamodb.conditions import Key
-
 @app.route('/loginUser', methods=['POST'])
 def login_user():
     email = request.form['email']
-    username = request.form['username']  # Get the username from form input
     password = request.form['password']
 
     try:
-        # Query DynamoDB using both Partition Key (email) and Sort Key (username)
         response = table.get_item(
-            Key={'email': email, 'username': username}
+            Key={'email': email}
         )
 
-        # Check if a user was found
         user = response.get('Item')
-        if user:
-            # Debugging - Print user info
-            print(f"User data fetched from DB: {user}")
-            print(f"Entered password: {password}")
+        if user and user['password'] == password:
+            session['email'] = email
+            return redirect('/dashboard')
 
-            # Check password
-            if user['password'] == password:
-                session['username'] = user['username']
-                session['email'] = user['email']
-                return redirect('/dashboard')
-
-        # If no user is found or password is incorrect
-        return render_template('login.html', error="Invalid email, username, or password")
+        return render_template('login.html', error="Invalid credentials")
 
     except Exception as e:
         print(f"Error: {str(e)}")
-        return render_template('login.html', error="An error occurred. Please try again.")
-
-
+        return render_template('login.html', error="Login failed")
 
 @app.route('/dashboard')
 def dashboard():
     if 'email' not in session:
-        # If email is not found in session, redirect to the login page
         return redirect('/')
 
-    # Get user data from DynamoDB using the email stored in the session
     user = table.get_item(
-        Key={'email': session['email'],"username":session['username']}
+        Key={'email': session['email']}
     ).get('Item', {})
 
-    # Render the dashboard template with user details
-    return render_template('dashboard.html',
-                           profile_pic=user.get('profile_pic', ''),
-                           username=session['username'])
+    session['username']=user['username']
+    return render_template('dashboard.html', username=session['username'])
 
-
-@app.route('/uploadProfilePic', methods=['POST'])
-def upload_profile_pic():
+def upload_health_record(file, category):
     if 'email' not in session:
-        return redirect('/')
-        
-    if 'profile_pic' not in request.files:
-        return redirect('/dashboard')
-        
-    file = request.files['profile_pic']
-    if file.filename == '':
-        return redirect('/dashboard')
-        
-    # Create unique filename
-    filename = secure_filename(file.filename)
-    unique_filename = f"profile_pics/{session['email']}/{uuid.uuid4()}_{filename}"
-    
-    # Upload to S3
+        print("Error: User not logged in")
+        return None
+
     try:
-        s3.upload_fileobj(
-            file,
-            S3_BUCKET,
+        # Generate a unique filename using UUID
+        unique_filename = f"{uuid.uuid4()}_{secure_filename(file.filename)}"
+        
+        # Generate a unique file_id (could also use a timestamp here)
+        file_id = str(uuid.uuid4())
+
+        # Upload file to S3
+        s3_client.upload_fileobj(
+            file, 
+            S3_BUCKET, 
             unique_filename,
-            ExtraArgs={'ACL': 'public-read'}
+            ExtraArgs={'ContentType': file.content_type}
         )
-        
-        # Create S3 URL
-        file_url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{unique_filename}"
-        
-        # Update DynamoDB with profile picture URL
-        table.update_item(
-            Key={'email': session['email'],"username":session['username']},
-            UpdateExpression="set profile_pic = :p",
-            ExpressionAttributeValues={':p': file_url}
-        )
-    except Exception as e:
-        print(f"Error: {str(e)}")
-    
-    return redirect('/dashboard')
 
-@app.route('/listFiles')
-def list_files():
+        # S3 file URI
+        file_uri = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{unique_filename}"
+        
+        # Store record in DynamoDB with the new composite key (email + file_id)
+        health_records_table.put_item(
+            Item={
+                'email': session['email'],  # Partition key
+                'file_id': file_id,  # Sort key
+                'file_uri': file_uri,
+                'category': category,
+                'uploaded_at': datetime.utcnow().isoformat(),
+                'filename': unique_filename
+            }
+        )
+
+        print(f"Upload successful: {file_uri}")
+        
+        return file_uri
+
+    except Exception as e:
+        print(f"Upload error: {str(e)}")  # Log the error
+        return None
+
+
+@app.route('/upload_health_record', methods=['POST'])
+def handle_health_record_upload():
     if 'email' not in session:
-        return redirect('/')
+        return "User not logged in", 403
+
+    if 'file' not in request.files:
+        return "No file part", 400
+
+    file = request.files['file']
+    category = request.form.get('category')
+
+    if file.filename == '':
+        return "No selected file", 400
+
+    result = upload_health_record(file, category)
+
+    if result:
+        return "File uploaded successfully", 200
+    else:
+        return "Upload failed", 500
+
+@app.route('/myrecords')
+def myrecords():
+    return render_template("my-records.html")
+
+from flask import jsonify
+
+@app.route('/get_health_records', methods=['GET'])
+def get_health_records():
+    if 'email' not in session:
+        return jsonify({"error": "User not logged in"}), 403  # Unauthorized access
+
+    email = session['email']
+    category = request.args.get('category', 'all')  # Default to 'all' if no category is provided
 
     try:
-        # Fetch all files from S3 bucket
-        response = s3.list_objects_v2(Bucket=S3_BUCKET)
-        files = []
+        # Set the base filter expression
+        filter_expression = "email = :email"
+        expression_values = {":email": email}
 
-        if 'Contents' in response:
-            for obj in response['Contents']:
-                file_url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{obj['Key']}"
-                files.append(file_url)
+        # If a category is selected, filter by it
+        if category != 'all':
+            filter_expression += " AND category = :category"
+            expression_values[":category"] = category
 
-        return render_template('list_files.html', files=files)
+        # Query DynamoDB
+        response = health_records_table.scan(
+            FilterExpression=filter_expression,
+            ExpressionAttributeValues=expression_values
+        )
+
+        records = response.get('Items', [])
+        print(records)
+        return jsonify({"records": records}), 200  # Success
 
     except Exception as e:
-        print(f"Error: {str(e)}")
-        return "Error fetching files."
+        print(f"Error fetching records: {str(e)}")
+        return jsonify({"error": "Failed to fetch records"}), 500  # Internal Server Error
+
+@app.route('/delete_health_record', methods=['POST'])
+def delete_health_record():
+    if 'email' not in session:
+        return jsonify({"error": "User not logged in"}), 403  # Unauthorized access
+
+    file_id = request.json.get('file_id')
+    
+    if not file_id:
+        return jsonify({"error": "File ID is required"}), 400
+
+    try:
+        # Get the health record from DynamoDB
+        response = health_records_table.get_item(
+            Key={'email': session['email'], 'file_id': file_id}
+        )
+
+        record = response.get('Item')
+        if not record:
+            return jsonify({"error": "Record not found"}), 404
+
+        # Delete the file from S3
+        s3_client.delete_object(
+            Bucket=S3_BUCKET,
+            Key=record['filename']
+        )
+
+        # Delete the record from DynamoDB
+        health_records_table.delete_item(
+            Key={'email': session['email'], 'file_id': file_id}
+        )
+
+        return jsonify({"message": "Record deleted successfully"}), 200
+
+    except Exception as e:
+        print(f"Error deleting record: {str(e)}")
+        return jsonify({"error": "Failed to delete record"}), 500
 
 
 
